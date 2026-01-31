@@ -5,7 +5,6 @@ import requests
 import os
 import io
 import logging
-import pandas as pd
 from datetime import datetime
 from google.cloud import storage
 import requests
