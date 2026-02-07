@@ -58,6 +58,7 @@ def registrar_reporte_completo(request, conn, headers):
         pdf_file = request.files['file']
         registrado_por = request.form.get("registrado_por")
         area = request.form.get("area")
+        periodo = request.form.get("periodo")
         # El front debe enviar el array de registros como string JSON
         asistencias_json = json.loads(request.form.get("asistencias", "[]"))
 
