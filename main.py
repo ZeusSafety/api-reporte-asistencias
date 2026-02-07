@@ -87,7 +87,7 @@ def registrar_reporte_completo(request, conn, headers):
                 ))
             
             conn.commit()
-            return (json.dumps({"success": True, "message": "Datos cargados correctamente", "url": url_pdf}), 200, headers)
+            return (json.dumps({"success": True, "message": "Datos cargados correctamente", "url": url_pdf, "id_registro": id_registro}), 200, headers)
 
     except Exception as e:
         if conn: conn.rollback()
