@@ -70,8 +70,8 @@ def registrar_reporte_completo(request, conn, headers):
         # 3. Guardar en Base de Datos
         with conn.cursor() as cursor:
             # Insertar Bitácora
-            sql_carga = "INSERT INTO registros_carga (registrado_por, area, pdf_reporte) VALUES (%s, %s, %s)"
-            cursor.execute(sql_carga, (registrado_por, area, url_pdf))
+            sql_carga = "INSERT INTO registros_carga (periodo, registrado_por, area, pdf_reporte) VALUES (%s, %s, %s, %s)"
+            cursor.execute(sql_carga, (periodo, registrado_por, area, url_pdf))
             id_registro = cursor.lastrowid
 
             # Insertar Empleados y Asistencias
