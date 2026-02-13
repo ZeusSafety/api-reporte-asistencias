@@ -94,7 +94,48 @@ def registrar_reporte_completo(request, conn, headers):
         if conn: conn.rollback()
         logging.error(f"Error en registro: {e}")
         return (json.dumps({"error": str(e)}), 500, headers)
-    
+
+# =================================================================
+#          OBTENER HISTORIAL DE CARGAS (REGISTROS_CARGA)
+# =================================================================
+def obtener_historial_cargas(conn, headers):
+    try:
+        with conn.cursor() as cursor:
+            sql = """
+                SELECT id_registro, periodo, registrado_por, area, pdf_reporte, created_at
+                FROM registros_carga
+                ORDER BY id_registro DESC
+            """
+            cursor.execute(sql)
+            resultados = cursor.fetchall()
+            
+            historial = []
+            for r in resultados:
+                # Manejar tanto diccionarios como tuplas
+                if isinstance(r, dict):
+                    historial.append({
+                        'id_registro': r['id_registro'],
+                        'periodo': r['periodo'],
+                        'registrado_por': r['registrado_por'],
+                        'area': r['area'],
+                        'pdf_reporte': r['pdf_reporte'],
+                        'created_at': str(r.get('created_at', ''))
+                    })
+                else:
+                    historial.append({
+                        'id_registro': r[0],
+                        'periodo': r[1],
+                        'registrado_por': r[2],
+                        'area': r[3],
+                        'pdf_reporte': r[4],
+                        'created_at': str(r[5]) if len(r) > 5 else ''
+                    })
+            
+            return (json.dumps(historial), 200, headers)
+    except Exception as e:
+        logging.error(f"Error al obtener historial: {e}")
+        return (json.dumps({"error": str(e)}), 500, headers)
+
 # =================================================================
 #                DE DATOS DE ASISTENCIA PARA DASHBOARD
 # =================================================================
@@ -192,6 +233,9 @@ def reporteAsistencias(request):
     try:
        if method == 'POST' and (path.endswith('/guardar-reporte') or path == '/'):
             return registrar_reporte_completo(request, conn, headers)
+       
+       elif method == 'GET' and path.endswith('/historial-cargas'):
+            return obtener_historial_cargas(conn, headers)
         
        elif method == 'GET' and (path.endswith('/dashboard') or path == '/'):
             return obtener_datos_dashboard(conn, headers)
@@ -202,5 +246,5 @@ def reporteAsistencias(request):
     except Exception as e:
         # Captura errores de servidor o de lógica de negocio (Errores 500)
         return (json.dumps({'success': False, 'error': f'Error interno del servidor: {str(e)}'}), 500, headers)
-
-
+    
+    
