@@ -102,7 +102,7 @@ def obtener_historial_cargas(conn, headers):
     try:
         with conn.cursor() as cursor:
             sql = """
-                SELECT id_registro, periodo, registrado_por, area, pdf_reporte, created_at
+                SELECT id_registro, periodo, registrado_por, area, pdf_reporte
                 FROM registros_carga
                 ORDER BY id_registro DESC
             """
@@ -118,8 +118,7 @@ def obtener_historial_cargas(conn, headers):
                         'periodo': r['periodo'],
                         'registrado_por': r['registrado_por'],
                         'area': r['area'],
-                        'pdf_reporte': r['pdf_reporte'],
-                        'created_at': str(r.get('created_at', ''))
+                        'pdf_reporte': r['pdf_reporte']
                     })
                 else:
                     historial.append({
@@ -127,8 +126,7 @@ def obtener_historial_cargas(conn, headers):
                         'periodo': r[1],
                         'registrado_por': r[2],
                         'area': r[3],
-                        'pdf_reporte': r[4],
-                        'created_at': str(r[5]) if len(r) > 5 else ''
+                        'pdf_reporte': r[4]
                     })
             
             return (json.dumps(historial), 200, headers)
