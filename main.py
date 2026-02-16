@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from google.cloud import storage
 import requests
-
+from datetime import datetime, timedelta, timezone
 
 # Conexión a MySQL
 def get_connection():
@@ -20,10 +20,11 @@ def get_connection():
         cursorclass=pymysql.cursors.DictCursor
     )
 
-    # Para establecer la zona horaria a UTC-5
-    with conn.cursor() as cursor:
-        cursor.execute("SET time_zone = '-05:00'")
-    return conn
+# Definir la zona horaria de Perú (UTC-5)
+TZ_PERU = timezone(timedelta(hours=-5))
+
+def get_now_peru():
+    return datetime.now(TZ_PERU).strftime('%Y-%m-%d %H:%M:%S')
 
 
 ## Función de Subida a Cloud Storage
@@ -67,11 +68,16 @@ def registrar_reporte_completo(request, conn, headers):
         if not url_pdf:
             return (json.dumps({"error": "Error al guardar PDF en la nube"}), 500, headers)
 
+        fecha_actual = get_now_peru()
+
         # 3. Guardar en Base de Datos
         with conn.cursor() as cursor:
             # Insertar Bitácora
-            sql_carga = "INSERT INTO registros_carga (periodo, registrado_por, area, pdf_reporte) VALUES (%s, %s, %s, %s)"
-            cursor.execute(sql_carga, (periodo, registrado_por, area, url_pdf))
+            sql_carga = """
+                INSERT INTO registros_carga (periodo, registrado_por, area, pdf_reporte, fecha_operacion) 
+                VALUES (%s, %s, %s, %s, %s)
+            """
+            cursor.execute(sql_carga, (periodo, registrado_por, area, url_pdf, fecha_actual))
             id_registro = cursor.lastrowid
 
             # Insertar Empleados y Asistencias
@@ -118,20 +124,22 @@ def actualizar_reporte(request, conn, headers):
             pdf_file = request.files['file']
             url_pdf = upload_to_gcs(pdf_file)
 
+        fecha_actual = get_now_peru()
+
         # 3. Transacción en Base de Datos
         with conn.cursor() as cursor:
             # Actualizar datos maestros en registros_carga
             if url_pdf:
                 sql_upd_carga = """UPDATE registros_carga 
-                                   SET periodo=%s, registrado_por=%s, area=%s, pdf_reporte=%s, fecha_operacion=CURRENT_TIMESTAMP 
+                                   SET periodo=%s, registrado_por=%s, area=%s, pdf_reporte=%s, fecha_operacion=%s 
                                    WHERE id_registro=%s"""
-                cursor.execute(sql_upd_carga, (periodo, registrado_por, area, url_pdf, id_registro))
+                cursor.execute(sql_upd_carga, (periodo, registrado_por, area, url_pdf, fecha_actual, id_registro))
             else:
                 sql_upd_carga = """UPDATE registros_carga 
-                                   SET periodo=%s, registrado_por=%s, area=%s, fecha_operacion=CURRENT_TIMESTAMP 
+                                   SET periodo=%s, registrado_por=%s, area=%s, fecha_operacion=%s 
                                    WHERE id_registro=%s"""
-                cursor.execute(sql_upd_carga, (periodo, registrado_por, area, id_registro))
-
+                cursor.execute(sql_upd_carga, (periodo, registrado_por, area, fecha_actual, id_registro))
+                
             # ELIMINAR asistencias previas asociadas a este registro (Limpieza total)
             cursor.execute("DELETE FROM asistencias WHERE id_registro = %s", (id_registro,))
 
