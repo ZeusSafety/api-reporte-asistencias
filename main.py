@@ -95,6 +95,72 @@ def registrar_reporte_completo(request, conn, headers):
         logging.error(f"Error en registro: {e}")
         return (json.dumps({"error": str(e)}), 500, headers)
 
+
+# =================================================================
+#          ACTUALIZAR REGISTRO DE ASISTENCIA
+# =================================================================        
+def actualizar_reporte(request, conn, headers):
+    """Actualiza un reporte existente: reemplaza PDF y refresca la lista de asistencias"""
+    try:
+        # 1. Extraer datos obligatorios para actualizar
+        id_registro = request.form.get("id_registro")
+        if not id_registro:
+            return (json.dumps({"error": "Falta el id_registro para actualizar"}), 400, headers)
+
+        registrado_por = request.form.get("registrado_por")
+        area = request.form.get("area")
+        periodo = request.form.get("periodo")
+        asistencias_json = json.loads(request.form.get("asistencias", "[]"))
+        
+        # 2. Manejo del PDF (Opcional en actualización, por si solo quieren corregir datos)
+        url_pdf = None
+        if 'file' in request.files:
+            pdf_file = request.files['file']
+            url_pdf = upload_to_gcs(pdf_file)
+
+        # 3. Transacción en Base de Datos
+        with conn.cursor() as cursor:
+            # Actualizar datos maestros en registros_carga
+            if url_pdf:
+                sql_upd_carga = """UPDATE registros_carga 
+                                   SET periodo=%s, registrado_por=%s, area=%s, pdf_reporte=%s, fecha_operacion=CURRENT_TIMESTAMP 
+                                   WHERE id_registro=%s"""
+                cursor.execute(sql_upd_carga, (periodo, registrado_por, area, url_pdf, id_registro))
+            else:
+                sql_upd_carga = """UPDATE registros_carga 
+                                   SET periodo=%s, registrado_por=%s, area=%s, fecha_operacion=CURRENT_TIMESTAMP 
+                                   WHERE id_registro=%s"""
+                cursor.execute(sql_upd_carga, (periodo, registrado_por, area, id_registro))
+
+            # ELIMINAR asistencias previas asociadas a este registro (Limpieza total)
+            cursor.execute("DELETE FROM asistencias WHERE id_registro = %s", (id_registro,))
+
+            # INSERTAR las nuevas asistencias del Excel actualizado
+            for reg in asistencias_json:
+                cursor.execute("INSERT IGNORE INTO empleados (id_empleado, nombre) VALUES (%s, %s)", 
+                             (reg['id'], reg['nombre']))
+
+                sql_asist = """INSERT INTO asistencias (id_empleado, id_registro, fecha, hora_entrada, hora_salida) 
+                               VALUES (%s, %s, %s, %s, %s)"""
+                cursor.execute(sql_asist, (
+                    reg['id'], id_registro, reg['fecha'],
+                    reg.get('entrada') or None, 
+                    reg.get('salida') or None
+                ))
+
+            conn.commit()
+            return (json.dumps({
+                "success": True, 
+                "message": f"Registro {id_registro} actualizado correctamente",
+                "id_registro": id_registro
+            }), 200, headers)
+
+    except Exception as e:
+        if conn: conn.rollback()
+        logging.error(f"Error en actualización: {e}")
+        return (json.dumps({"error": str(e)}), 500, headers)
+
+
 # =================================================================
 #          OBTENER HISTORIAL DE CARGAS (REGISTROS_CARGA)
 # =================================================================
@@ -229,12 +295,19 @@ def reporteAsistencias(request):
     conn = get_connection()
 
     try:
+       # RUTA: Guardar Nuevo (POST)
        if method == 'POST' and (path.endswith('/guardar-reporte') or path == '/'):
             return registrar_reporte_completo(request, conn, headers)
        
+       # RUTA: Actualizar Existente (PUT) 
+       elif method == 'PUT' and path.endswith('/actualizar-reporte'):
+            return actualizar_reporte(request, conn, headers)
+       
+       # RUTA: Historial (GET)
        elif method == 'GET' and path.endswith('/historial-cargas'):
             return obtener_historial_cargas(conn, headers)
         
+        # RUTA: Dashboard (GET)
        elif method == 'GET' and (path.endswith('/dashboard') or path == '/'):
             return obtener_datos_dashboard(conn, headers)
         
