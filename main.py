@@ -157,7 +157,7 @@ def actualizar_reporte(request, conn, headers):
 
             # --- 3. GUARDAR LOG INTERNO ---
             foto_nueva = {"maestro": {"periodo": periodo, "area": area}, "asistencias_count": len(asistencias_json)}
-            sql_log = """INSERT INTO historial_cambios (id_registro, usuario_accion, fecha_cambio, tipo_operacion, datos_anteriores, datos_nuevos) 
+            sql_log = """INSERT INTO historial_cambios_asistencias (id_registro, usuario_accion, fecha_cambio, tipo_operacion, datos_anteriores, datos_nuevos) 
                          VALUES (%s, %s, %s, %s, %s, %s)"""
             cursor.execute(sql_log, (id_registro, registrado_por, fecha_hoy, 'ACTUALIZACION', json.dumps(foto_anterior), json.dumps(foto_nueva)))
 
