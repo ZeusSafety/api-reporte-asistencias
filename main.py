@@ -109,28 +109,38 @@ def registrar_reporte_completo(request, conn, headers):
 #          ACTUALIZAR REGISTRO DE ASISTENCIA
 # =================================================================        
 def actualizar_reporte(request, conn, headers):
-    """Actualiza un reporte existente: reemplaza PDF y refresca la lista de asistencias"""
+    """Actualiza reporte, refresca asistencias y guarda log de auditoría"""
     try:
-        # 1. Extraer datos obligatorios para actualizar
         id_registro = request.form.get("id_registro")
         if not id_registro:
-            return (json.dumps({"error": "Falta el id_registro para actualizar"}), 400, headers)
+            return (json.dumps({"error": "Falta el id_registro"}), 400, headers)
 
         registrado_por = request.form.get("registrado_por")
         area = request.form.get("area")
         periodo = request.form.get("periodo")
         asistencias_json = json.loads(request.form.get("asistencias", "[]"))
-        
-        # 2. Manejo del PDF (Opcional en actualización, por si solo quieren corregir datos)
-        url_pdf = None
-        if 'file' in request.files:
-            pdf_file = request.files['file']
-            url_pdf = upload_to_gcs(pdf_file)
+        fecha_hoy = get_now_peru()
 
-        # 3. Transacción en Base de Datos
         with conn.cursor() as cursor:
-            # Actualizar datos maestros en registros_carga
-            fecha_hoy = get_now_peru() 
+            # --- 1. CAPTURAR ESTADO ANTERIOR (AUDITORÍA) ---
+            cursor.execute("SELECT * FROM registros_carga WHERE id_registro = %s", (id_registro,))
+            old_master = cursor.fetchone()
+            if old_master and old_master.get('fecha_operacion'):
+                old_master['fecha_operacion'] = str(old_master['fecha_operacion'])
+
+            cursor.execute("SELECT * FROM asistencias WHERE id_registro = %s", (id_registro,))
+            old_asistencias = cursor.fetchall()
+            for a in old_asistencias:
+                for k in ['fecha', 'hora_entrada', 'hora_salida']:
+                    if a.get(k): a[k] = str(a[k])
+
+            foto_anterior = {"maestro": old_master, "asistencias": old_asistencias}
+
+            # --- 2. PROCESAR ACTUALIZACIÓN ---
+            url_pdf = None
+            if 'file' in request.files:
+                url_pdf = upload_to_gcs(request.files['file'])
+
             if url_pdf:
                 sql = "UPDATE registros_carga SET periodo=%s, registrado_por=%s, area=%s, pdf_reporte=%s, fecha_operacion=%s WHERE id_registro=%s"
                 cursor.execute(sql, (periodo, registrado_por, area, url_pdf, fecha_hoy, id_registro))
@@ -138,34 +148,25 @@ def actualizar_reporte(request, conn, headers):
                 sql = "UPDATE registros_carga SET periodo=%s, registrado_por=%s, area=%s, fecha_operacion=%s WHERE id_registro=%s"
                 cursor.execute(sql, (periodo, registrado_por, area, fecha_hoy, id_registro))
 
-            # ELIMINAR asistencias previas asociadas a este registro (Limpieza total)
+            # Limpieza y re-inserción de asistencias
             cursor.execute("DELETE FROM asistencias WHERE id_registro = %s", (id_registro,))
-
-            # INSERTAR las nuevas asistencias del Excel actualizado
             for reg in asistencias_json:
-                cursor.execute("INSERT IGNORE INTO empleados (id_empleado, nombre) VALUES (%s, %s)", 
-                             (reg['id'], reg['nombre']))
+                cursor.execute("INSERT IGNORE INTO empleados (id_empleado, nombre) VALUES (%s, %s)", (reg['id'], reg['nombre']))
+                cursor.execute("INSERT INTO asistencias (id_empleado, id_registro, fecha, hora_entrada, hora_salida) VALUES (%s, %s, %s, %s, %s)",
+                             (reg['id'], id_registro, reg['fecha'], reg.get('entrada'), reg.get('salida')))
 
-                sql_asist = """INSERT INTO asistencias (id_empleado, id_registro, fecha, hora_entrada, hora_salida) 
-                               VALUES (%s, %s, %s, %s, %s)"""
-                cursor.execute(sql_asist, (
-                    reg['id'], id_registro, reg['fecha'],
-                    reg.get('entrada') or None, 
-                    reg.get('salida') or None
-                ))
+            # --- 3. GUARDAR LOG INTERNO ---
+            foto_nueva = {"maestro": {"periodo": periodo, "area": area}, "asistencias_count": len(asistencias_json)}
+            sql_log = """INSERT INTO historial_cambios (id_registro, usuario_accion, fecha_cambio, tipo_operacion, datos_anteriores, datos_nuevos) 
+                         VALUES (%s, %s, %s, %s, %s, %s)"""
+            cursor.execute(sql_log, (id_registro, registrado_por, fecha_hoy, 'ACTUALIZACION', json.dumps(foto_anterior), json.dumps(foto_nueva)))
 
             conn.commit()
-            return (json.dumps({
-                "success": True, 
-                "message": f"Registro {id_registro} actualizado correctamente",
-                "id_registro": id_registro
-            }), 200, headers)
+            return (json.dumps({"success": True, "message": "Registro actualizado y auditado"}), 200, headers)
 
     except Exception as e:
         if conn: conn.rollback()
-        logging.error(f"Error en actualización: {e}")
         return (json.dumps({"error": str(e)}), 500, headers)
-
 
 # =================================================================
 #          OBTENER HISTORIAL DE CARGAS (REGISTROS_CARGA)
@@ -229,6 +230,7 @@ def obtener_datos_dashboard(conn, headers):
             return (json.dumps(resultados), 200, headers)
     except Exception as e:
         return (json.dumps({"error": str(e)}), 500, headers)
+
 
 # =================================================================
 #                       FUNCIÓN PRINCIPAL (ROUTER)
