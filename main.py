@@ -73,8 +73,6 @@ def registrar_reporte_completo(request, conn, headers):
         if not url_pdf:
             return (json.dumps({"error": "Error al guardar PDF en la nube"}), 500, headers)
 
-        fecha_actual = get_now_peru()
-
         # 3. Guardar en Base de Datos
         with conn.cursor() as cursor:
             # Insertar Bitácora
@@ -129,19 +127,17 @@ def actualizar_reporte(request, conn, headers):
             pdf_file = request.files['file']
             url_pdf = upload_to_gcs(pdf_file)
 
-        fecha_actual = get_now_peru()
-
         # 3. Transacción en Base de Datos
         with conn.cursor() as cursor:
             # Actualizar datos maestros en registros_carga
             fecha_hoy = get_now_peru() 
-        if url_pdf:
-            sql = "UPDATE registros_carga SET periodo=%s, registrado_por=%s, area=%s, pdf_reporte=%s, fecha_operacion=%s WHERE id_registro=%s"
-            cursor.execute(sql, (periodo, registrado_por, area, url_pdf, fecha_hoy, id_registro))
-        else:
-            sql = "UPDATE registros_carga SET periodo=%s, registrado_por=%s, area=%s, fecha_operacion=%s WHERE id_registro=%s"
-            cursor.execute(sql, (periodo, registrado_por, area, fecha_hoy, id_registro))
-            
+            if url_pdf:
+                sql = "UPDATE registros_carga SET periodo=%s, registrado_por=%s, area=%s, pdf_reporte=%s, fecha_operacion=%s WHERE id_registro=%s"
+                cursor.execute(sql, (periodo, registrado_por, area, url_pdf, fecha_hoy, id_registro))
+            else:
+                sql = "UPDATE registros_carga SET periodo=%s, registrado_por=%s, area=%s, fecha_operacion=%s WHERE id_registro=%s"
+                cursor.execute(sql, (periodo, registrado_por, area, fecha_hoy, id_registro))
+
             # ELIMINAR asistencias previas asociadas a este registro (Limpieza total)
             cursor.execute("DELETE FROM asistencias WHERE id_registro = %s", (id_registro,))
 
