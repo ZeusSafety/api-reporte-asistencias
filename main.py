@@ -10,22 +10,27 @@ from google.cloud import storage
 import requests
 from datetime import datetime, timedelta, timezone
 
-# Conexión a MySQL
-def get_connection():
-    conn = pymysql.connect(
-        user="zeussafety-2024",
-        password="ZeusSafety2025",
-        db="Zeus_Safety_Data_Integration",
-        unix_socket="/cloudsql/stable-smithy-435414-m6:us-central1:zeussafety-2024",
-        cursorclass=pymysql.cursors.DictCursor
-    )
-
 # Definir la zona horaria de Perú (UTC-5)
 TZ_PERU = timezone(timedelta(hours=-5))
 
 def get_now_peru():
     return datetime.now(TZ_PERU).strftime('%Y-%m-%d %H:%M:%S')
 
+# Conexión a MySQL
+def get_connection():
+    try:
+        conn = pymysql.connect(
+            user="zeussafety-2024",
+            password="ZeusSafety2025",
+            db="Zeus_Safety_Data_Integration",
+            unix_socket="/cloudsql/stable-smithy-435414-m6:us-central1:zeussafety-2024",
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=10 # Añadimos un timeout
+        )
+        return conn
+    except Exception as e:
+        logging.error(f"Error crítico al conectar a la base de datos: {e}")
+        return None
 
 ## Función de Subida a Cloud Storage
 # Variables globales para el cliente y el bucket de GCS
@@ -73,11 +78,11 @@ def registrar_reporte_completo(request, conn, headers):
         # 3. Guardar en Base de Datos
         with conn.cursor() as cursor:
             # Insertar Bitácora
-            sql_carga = """
-                INSERT INTO registros_carga (periodo, registrado_por, area, pdf_reporte, fecha_operacion) 
-                VALUES (%s, %s, %s, %s, %s)
-            """
-            cursor.execute(sql_carga, (periodo, registrado_por, area, url_pdf, fecha_actual))
+            fecha_hoy = get_now_peru() # Obtenemos la hora de Perú
+            sql_carga = """INSERT INTO registros_carga (periodo, registrado_por, area, pdf_reporte, fecha_operacion) 
+                            VALUES (%s, %s, %s, %s, %s)"""
+            cursor.execute(sql_carga, (periodo, registrado_por, area, url_pdf, fecha_hoy))
+
             id_registro = cursor.lastrowid
 
             # Insertar Empleados y Asistencias
@@ -129,17 +134,14 @@ def actualizar_reporte(request, conn, headers):
         # 3. Transacción en Base de Datos
         with conn.cursor() as cursor:
             # Actualizar datos maestros en registros_carga
-            if url_pdf:
-                sql_upd_carga = """UPDATE registros_carga 
-                                   SET periodo=%s, registrado_por=%s, area=%s, pdf_reporte=%s, fecha_operacion=%s 
-                                   WHERE id_registro=%s"""
-                cursor.execute(sql_upd_carga, (periodo, registrado_por, area, url_pdf, fecha_actual, id_registro))
-            else:
-                sql_upd_carga = """UPDATE registros_carga 
-                                   SET periodo=%s, registrado_por=%s, area=%s, fecha_operacion=%s 
-                                   WHERE id_registro=%s"""
-                cursor.execute(sql_upd_carga, (periodo, registrado_por, area, fecha_actual, id_registro))
-                
+            fecha_hoy = get_now_peru() 
+        if url_pdf:
+            sql = "UPDATE registros_carga SET periodo=%s, registrado_por=%s, area=%s, pdf_reporte=%s, fecha_operacion=%s WHERE id_registro=%s"
+            cursor.execute(sql, (periodo, registrado_por, area, url_pdf, fecha_hoy, id_registro))
+        else:
+            sql = "UPDATE registros_carga SET periodo=%s, registrado_por=%s, area=%s, fecha_operacion=%s WHERE id_registro=%s"
+            cursor.execute(sql, (periodo, registrado_por, area, fecha_hoy, id_registro))
+            
             # ELIMINAR asistencias previas asociadas a este registro (Limpieza total)
             cursor.execute("DELETE FROM asistencias WHERE id_registro = %s", (id_registro,))
 
@@ -298,9 +300,14 @@ def reporteAsistencias(request):
         return ("", 204, headers)
     
     # Enrutamiento (Routing)
+    conn = get_connection()
+    # VALIDACIÓN DE SEGURIDAD
+    if conn is None:
+        return (json.dumps({"error": "No se pudo establecer conexión con la base de datos"}), 503, headers)
+    
     path = request.path
     method = request.method
-    conn = get_connection()
+    
 
     try:
        # RUTA: Guardar Nuevo (POST)
@@ -325,5 +332,9 @@ def reporteAsistencias(request):
     except Exception as e:
         # Captura errores de servidor o de lógica de negocio (Errores 500)
         return (json.dumps({'success': False, 'error': f'Error interno del servidor: {str(e)}'}), 500, headers)
+    
+    finally:
+        if conn:
+            conn.close()
     
     
